@@ -1,0 +1,90 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# Streamlit setup
+st.set_page_config(page_title="Forecasting with ARIMA and Exponential Smoothing", layout="wide")
+st.title("Forecasting Dashboard: ARIMA and Exponential Smoothing")
+
+uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.write("Sample Data", df.head())
+
+    time_col = df.columns[0]
+    dl_col = df.columns[1]
+    ds_col = df.columns[2]
+
+    window_size = st.slider("Sliding window size", min_value=30, max_value=200, value=60)
+    delay = st.slider("Delay between updates (seconds)", min_value=0.1, max_value=3.0, value=0.5)
+    debug = st.sidebar.checkbox("Show Debug Info", value=False)
+
+    plot_placeholder = st.empty()
+
+    for i in range(window_size + 1, len(df) - 1):
+        window_df = df.iloc[i - window_size:i + 1]
+        time_vals = window_df[time_col].values
+        dl = window_df[dl_col].values
+        ds = window_df[ds_col].values
+
+        try:
+            # ARIMA Forecast for DL
+            model_dl_arima = ARIMA(dl, order=(3, 1, 1)).fit()
+            forecast_dl_arima = model_dl_arima.forecast(steps=1)[0]
+
+            # ARIMA Forecast for DS
+            model_ds_arima = ARIMA(ds, order=(3, 1, 1)).fit()
+            forecast_ds_arima = model_ds_arima.forecast(steps=1)[0]
+        except Exception as e:
+            if debug:
+                st.write(f"ARIMA error: {e}")
+            forecast_dl_arima, forecast_ds_arima = np.nan, np.nan
+
+        try:
+            # Exponential Smoothing Forecast for DL
+            model_dl_exp = ExponentialSmoothing(dl, trend='add').fit()
+            forecast_dl_exp = model_dl_exp.forecast(1)[0]
+
+            # Exponential Smoothing Forecast for DS
+            model_ds_exp = ExponentialSmoothing(ds, trend='add').fit()
+            forecast_ds_exp = model_ds_exp.forecast(1)[0]
+        except Exception as e:
+            if debug:
+                st.write(f"Exp Smoothing error: {e}")
+            forecast_dl_exp, forecast_ds_exp = np.nan, np.nan
+
+        # Plotting
+        fig, axs = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+
+        # DL Graphs
+        axs[0, 0].plot(time_vals, dl, label="DL Actual", color="blue")
+        axs[0, 0].axhline(forecast_dl_arima, color="red", linestyle='--', label="DL ARIMA Forecast")
+        axs[0, 0].legend()
+        axs[0, 0].set_title("DL - ARIMA Forecast")
+
+        axs[0, 1].plot(time_vals, dl, label="DL Actual", color="blue")
+        axs[0, 1].axhline(forecast_dl_exp, color="orange", linestyle='--', label="DL Exp Smoothing")
+        axs[0, 1].legend()
+        axs[0, 1].set_title("DL - Exponential Smoothing")
+
+        # DS Graphs
+        axs[1, 0].plot(time_vals, ds, label="DS Actual", color="green")
+        axs[1, 0].axhline(forecast_ds_arima, color="red", linestyle='--', label="DS ARIMA Forecast")
+        axs[1, 0].legend()
+        axs[1, 0].set_title("DS - ARIMA Forecast")
+
+        axs[1, 1].plot(time_vals, ds, label="DS Actual", color="green")
+        axs[1, 1].axhline(forecast_ds_exp, color="orange", linestyle='--', label="DS Exp Smoothing")
+        axs[1, 1].legend()
+        axs[1, 1].set_title("DS - Exponential Smoothing")
+
+        for ax in axs.flat:
+            ax.grid(True)
+
+        plot_placeholder.pyplot(fig)
+        time.sleep(delay)

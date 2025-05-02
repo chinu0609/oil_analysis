@@ -1,0 +1,103 @@
+
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import time
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# Page setup
+st.set_page_config(page_title="Real-Time Particle Smoothing", layout="wide")
+st.title("Real-Time Particle Data: DL + DS Predictions")
+
+# Load your data
+uploaded_file = st.file_uploader("Upload your particle data CSV", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+
+    st.write("### Sample Data", data.head())
+
+    time_col = st.selectbox("Select time column", data.columns, index=0)
+    dl_col = st.selectbox("Select DL column (model prediction)", data.columns, index=1)
+    ds_col = st.selectbox("Select DS column (model prediction)", data.columns, index=2)
+
+    dl_ds_col = None
+    if "DL+DS" in data.columns:
+        dl_ds_col = "DL+DS"
+
+    window_size = st.slider("Sliding window size", min_value=10, max_value=200, value=50, step=5)
+    delay = st.slider("Update delay (seconds)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+    forecast_steps = st.slider("Number of forecast steps", min_value=1, max_value=50, value=10)
+
+    plot_placeholder = st.empty()
+
+    for i in range(window_size, len(data)):
+        window_data = data.iloc[i - window_size:i].copy()
+
+        time_vals = window_data[time_col]
+        dl = window_data[dl_col].values
+        ds = window_data[ds_col].values
+
+        dl_plus_ds = dl + ds
+        dl_minus_ds = dl - ds
+
+        # Exponential Smoothing Forecasts
+        dl_model = ExponentialSmoothing(dl, trend="add", seasonal=None, initialization_method="estimated").fit()
+        ds_model = ExponentialSmoothing(ds, trend="add", seasonal=None, initialization_method="estimated").fit()
+
+        dl_forecast = dl_model.forecast(forecast_steps)
+        ds_forecast = ds_model.forecast(forecast_steps)
+
+        forecast_time = [time_vals.iloc[-1] + (time_vals.iloc[1] - time_vals.iloc[0]) * (j + 1) for j in range(forecast_steps)]
+
+        # Create Plotly figures
+        fig = go.Figure()
+
+        # Add DL and DL Forecast traces
+        fig.add_trace(go.Scatter(x=time_vals, y=dl, mode='lines', name="DL", line=dict(color='blue', dash='dash')))
+        fig.add_trace(go.Scatter(x=forecast_time, y=dl_forecast, mode='lines', name="DL Forecast", line=dict(color='blue')))
+
+        # Add DS and DS Forecast traces
+        fig.add_trace(go.Scatter(x=time_vals, y=ds, mode='lines', name="DS", line=dict(color='green', dash='dash')))
+        fig.add_trace(go.Scatter(x=forecast_time, y=ds_forecast, mode='lines', name="DS Forecast", line=dict(color='green')))
+
+        # Add DL + DS (Dynamic) and DL - DS traces
+        fig.add_trace(go.Scatter(x=time_vals, y=dl_plus_ds, mode='lines', name="DL + DS (Dynamic)", line=dict(color='purple')))
+        fig.add_trace(go.Scatter(x=time_vals, y=dl_minus_ds, mode='lines', name="DL - DS", line=dict(color='red')))
+
+        # Add DL + DS Forecast and DL - DS Forecast traces
+        fig.add_trace(go.Scatter(x=forecast_time, y=dl_forecast + ds_forecast, mode='lines', name="DL + DS Forecast", line=dict(color='purple', dash='dot')))
+        fig.add_trace(go.Scatter(x=forecast_time, y=dl_forecast - ds_forecast, mode='lines', name="DL - DS Forecast", line=dict(color='red', dash='dot')))
+
+        if dl_ds_col:
+            fig.add_trace(go.Scatter(x=time_vals, y=window_data[dl_ds_col], mode='lines', name="DL + DS (From CSV)", line=dict(color='black', dash='dot')))
+
+        # Highlight regions where DL or DS is zero (Add vertical shaded regions)
+        for j in range(window_size):
+            if dl[j] == 0 or ds[j] == 0:
+                fig.add_vrect(x0=time_vals.iloc[j], x1=time_vals.iloc[j], fillcolor="orange", opacity=0.3, line_width=0)
+
+        # Update layout for better presentation
+        fig.update_layout(
+            title="DL and DS Predictions with Forecasts",
+            xaxis_title="Time",
+            yaxis_title="Value",
+            template="plotly_dark",
+            showlegend=True,
+            height=600
+        )
+
+        plot_placeholder.plotly_chart(fig, use_container_width=True)
+
+        time.sleep(delay)
+
+    # Export snapshot
+    if st.button("Download Current Window as CSV"):
+        export_df = pd.DataFrame({
+            time_col: time_vals,
+            dl_col: dl,
+            ds_col: ds,
+            "DL + DS": dl_plus_ds,
+            "DL - DS": dl_minus_ds
+        })
+        st.download_button("Download", data=export_df.to_csv(index=False), file_name="snapshot.csv", mime="text/csv")
