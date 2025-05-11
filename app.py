@@ -19,18 +19,42 @@ next_time = 0
 initial_window = 50
 time_step = 0.5  # default time increment
 
+
+def thresh_color_DS(value):
+    if value > 400:
+        return 'red'
+    elif value > 150:
+        return 'yellow'
+    else:
+        return 'green'
+
+
+def thresh_color_DL(value):
+    if value > 150:
+        return 'red'
+    elif value > 80:
+        return 'yellow'
+    else:
+        return 'green'
+
+def thresh_color_DLplusDS(value):
+    if value > 550:
+        return 'red'
+    elif value > 230:
+        return 'yellow'
+    else:
+        return 'green'
+
+
+
 # Initialize Dash app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
 app.title = "Forecast: ARIMA & Exponential Smoothing"
 
 empty_dark_fig = go.Figure()
 empty_dark_fig.update_layout(
-    template='plotly_dark',
-    paper_bgcolor='#1e1e1e',
-    plot_bgcolor='#1e1e1e',
-    font=dict(color='white'),
-    xaxis=dict(showgrid=False),
-    yaxis=dict(showgrid=False)
+    xaxis=dict(showgrid=True),
+    yaxis=dict(showgrid=True)
 )
 
 app.layout = dbc.Container([
@@ -95,6 +119,12 @@ app.layout = dbc.Container([
     dcc.Interval(id='interval', interval=1000, n_intervals=0, disabled=True),
 
     dbc.Row([
+        dbc.Col(
+            dbc.Alert(id="alert-box", is_open=False, duration=4000, dismissable=True),
+            width=12
+        )
+    ]),
+    dbc.Row([
         dbc.Col(dbc.Card([
             dbc.CardHeader("DL Forecast", className="bg-dark text-white"),
             dbc.CardBody(
@@ -104,11 +134,12 @@ app.layout = dbc.Container([
         ], className="shadow-lg"), md=12)
     ], className="mb-4"),
 
+
     dbc.Row([
         dbc.Col(dbc.Card([
             dbc.CardHeader("DS Forecast", className="bg-dark text-white"),
             dbc.CardBody(
-                dcc.Graph(id='ds-graph', figure=empty_dark_fig, config={'displayModeBar': False}),
+                dcc.Graph(id='ds-graph',figure=empty_dark_fig ,config={'displayModeBar': False}),
                 className="bg-dark"
             )
         ], className="shadow-lg"), md=12)
@@ -122,7 +153,8 @@ app.layout = dbc.Container([
                 className="bg-dark"
             )
         ], className="shadow-lg"), md=12)
-    ])
+    ]),
+
 ], fluid=True, style={'backgroundColor': '#1e1e1e', 'padding': '2rem'})
 
 
@@ -148,7 +180,8 @@ def update_output(contents, filename, ts_step):
         ds_vals = df.iloc[:, 2].tolist()
 
         # Use initial_window last values
-        time_pred = [i * time_step for i in range(initial_window)]
+        # time_pred =
+        time_pred = time_vals[-initial_window:]
         pred_arima = {"DL": dl_vals[-initial_window:], "DS": ds_vals[-initial_window:]}
         pred_exp = {"DL": dl_vals[-initial_window:], "DS": ds_vals[-initial_window:]}
         next_time = time_pred[-1] + time_step
@@ -189,7 +222,10 @@ def forecast_next(method, series, window_size):
 @app.callback(
     [Output('dl-graph', 'figure'),
      Output('ds-graph', 'figure'),
-     Output('dlplusds-graph', 'figure')],
+     Output('dlplusds-graph', 'figure'),
+     Output('alert-box', 'children'),
+     Output('alert-box', 'color'),
+     Output('alert-box', 'is_open')],
     Input('interval', 'n_intervals'),
     State('window-slider', 'value'),
     State('upload-data', 'contents'),
@@ -198,12 +234,23 @@ def forecast_next(method, series, window_size):
 def update_forecast(n_intervals, window_size, uploaded_file, ts_step):
     global next_time, time_step
     if uploaded_file is None:
-        return go.Figure(), go.Figure(), go.Figure()
+        return go.Figure(), go.Figure(), go.Figure(),"","info",False
 
     time_step = ts_step if ts_step else 0.5
     window_size = max(1, window_size)
 
     # Forecast next value
+    alert_msg = ""
+    alert_color = "info"
+    show_alert = False
+
+    if pred_arima["DS"][-1] > 400 or  pred_arima["DL"][-1] > 150:
+        alert_msg = f"""🚨 ALERT:
+        Recommended Action:   Immediate inspection, oil change, possible overhaul,Complete oil flush, filter replacement
+        """
+        alert_color = "danger"
+        show_alert = True
+
     dl_arima_next = forecast_next("arima", pred_arima["DL"][-window_size:], window_size)
     ds_arima_next = forecast_next("arima", pred_arima["DS"][-window_size:], window_size)
     dl_exp_next = forecast_next("exp", pred_exp["DL"][-window_size:], window_size)
@@ -224,23 +271,24 @@ def update_forecast(n_intervals, window_size, uploaded_file, ts_step):
                                 name="ARIMA", line=dict(color='blue', dash="dot")))
     fig_dl.add_trace(go.Scatter(x=time_pred, y=pred_exp["DL"], mode='lines',
                                 name="Exp Smoothing", line=dict(color='blue')))
-    fig_dl.update_layout(template="plotly_dark", title="DL Prediction", xaxis_title="Time", yaxis_title="DL Value")
+    fig_dl.update_layout(template="plotly_dark", title="DL Prediction", xaxis_title="Time", yaxis_title="DL Value",plot_bgcolor=thresh_color_DL(pred_arima["DL"][-1]))
 
     fig_ds = go.Figure()
     fig_ds.add_trace(go.Scatter(x=time_pred, y=pred_arima["DS"], mode='lines',
-                                name="ARIMA", line=dict(color='green', dash="dot")))
-    fig_ds.add_trace(go.Scatter(x=time_pred, y=pred_exp["DS"], mode='lines',
-                                name="Exp Smoothing", line=dict(color='green')))
-    fig_ds.update_layout(template="plotly_dark", title="DS Prediction", xaxis_title="Time", yaxis_title="DS Value")
+                                name="ARIMA", line=dict(color='blue', dash="dot")))
 
+    fig_ds.add_trace(go.Scatter(x=time_pred, y=pred_exp["DS"], mode='lines',
+                                name="Exp Smoothing", line=dict(color='blue')))
+    fig_ds.update_layout(template="plotly_dark", title="DS Prediction", xaxis_title="Time", yaxis_title="DS Value",plot_bgcolor=thresh_color_DS(pred_arima["DS"][-1]))
+    
     fig_dlplusds = go.Figure()
     fig_dlplusds.add_trace(go.Scatter(x=time_pred, y=dlplusds_arima, mode='lines',
                                       name="ARIMA", line=dict(color='purple', dash="dot")))
     fig_dlplusds.add_trace(go.Scatter(x=time_pred, y=dlplusds_exp, mode='lines',
                                       name="Exp Smoothing", line=dict(color='purple')))
-    fig_dlplusds.update_layout(template="plotly_dark", title="DL + DS Prediction", xaxis_title="Time", yaxis_title="DL + DS Value")
+    fig_dlplusds.update_layout(template="plotly_dark", title="DL + DS Prediction", xaxis_title="Time", yaxis_title="DL + DS Value",plot_bgcolor=thresh_color_DLplusDS(dlplusds_arima[-1]))
 
-    return fig_dl, fig_ds, fig_dlplusds
+    return fig_dl, fig_ds, fig_dlplusds, alert_msg, alert_color, show_alert
 
 
 if __name__ == "__main__":
