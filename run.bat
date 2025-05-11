@@ -1,4 +1,7 @@
 @echo off
+REM Pull the latest changes from Git
+git pull
+
 REM Activate the virtual environment
 call env\Scripts\activate.bat
 
